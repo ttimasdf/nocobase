@@ -235,8 +235,8 @@ const APP_BASE_URL = process.env.APP_BASE_URL || `http://localhost:${PORT}`;
 
 export class NocoPage {
   private url: string;
-  private uid: string;
-  private collectionsName: string[];
+  private uid: string | undefined;
+  private collectionsName: string[] | undefined;
   private _waitForInit: Promise<void>;
 
   constructor(
@@ -296,7 +296,7 @@ export class NocoPage {
 const _test = base.extend<ExtendUtils>({
   mockPage: async ({ page }, use) => {
     // 保证每个测试运行时 faker 的随机值都是一样的
-    faker.seed(1);
+    // faker.seed(1);
 
     const nocoPages: NocoPage[] = [];
     const mockPage = (config?: PageConfig) => {
@@ -322,33 +322,33 @@ const _test = base.extend<ExtendUtils>({
     await use(mockManualDestroyPage);
   },
   createCollections: async ({ page }, use) => {
-    let collectionsName = [];
+    let collectionsName: string[] = [];
 
     const _createCollections = async (collectionSettings: CollectionSetting | CollectionSetting[]) => {
       collectionSettings = omitSomeFields(
         Array.isArray(collectionSettings) ? collectionSettings : [collectionSettings],
       );
-      collectionsName = collectionSettings.map((item) => item.name);
+      collectionsName = [...collectionsName, ...collectionSettings.map((item) => item.name)];
       await createCollections(collectionSettings);
     };
 
     await use(_createCollections);
 
     if (collectionsName.length) {
-      await deleteCollections(collectionsName);
+      await deleteCollections(_.uniq(collectionsName));
     }
   },
   mockCollections: async ({ page }, use) => {
-    let collectionsName = [];
+    let collectionsName: string[] = [];
     const destroy = async () => {
       if (collectionsName.length) {
-        await deleteCollections(collectionsName);
+        await deleteCollections(_.uniq(collectionsName));
       }
     };
 
     const mockCollections = async (collectionSettings: CollectionSetting[]) => {
       collectionSettings = omitSomeFields(collectionSettings);
-      collectionsName = collectionSettings.map((item) => item.name);
+      collectionsName = [...collectionsName, ...collectionSettings.map((item) => item.name)];
       return createCollections(collectionSettings);
     };
 
@@ -356,16 +356,16 @@ const _test = base.extend<ExtendUtils>({
     await destroy();
   },
   mockCollection: async ({ page }, use) => {
-    let collectionsName = [];
+    let collectionsName: string[] = [];
     const destroy = async () => {
       if (collectionsName.length) {
-        await deleteCollections(collectionsName);
+        await deleteCollections(_.uniq(collectionsName));
       }
     };
 
     const mockCollection = async (collectionSetting: CollectionSetting, options?: { manualDestroy: boolean }) => {
       const collectionSettings = omitSomeFields([collectionSetting]);
-      collectionsName = collectionSettings.map((item) => item.name);
+      collectionsName = [...collectionsName, ...collectionSettings.map((item) => item.name)];
       return createCollections(collectionSettings);
     };
 
@@ -746,41 +746,17 @@ const generateFakerData = (collectionSetting: CollectionSetting) => {
   };
   const result = {};
 
-  collectionSetting.fields.forEach((field) => {
-    if (excludeField.includes(field.name)) {
+  collectionSetting.fields?.forEach((field) => {
+    if (field.name && excludeField.includes(field.name)) {
       return;
     }
 
-    if (basicInterfaceToData[field.interface]) {
+    if (basicInterfaceToData[field.interface] && field.name) {
       result[field.name] = basicInterfaceToData[field.interface]();
     }
   });
 
   return result;
-};
-
-/**
- * 使用 Faker 为 collection 创建数据
- */
-const createFakerData = async (collectionSettings: CollectionSetting[]) => {
-  const api = await request.newContext({
-    storageState: process.env.PLAYWRIGHT_AUTH_FILE,
-  });
-
-  const state = await api.storageState();
-  const headers = getHeaders(state);
-
-  for (const item of collectionSettings) {
-    const data = generateFakerData(item);
-    const result = await api.post(`/api/${item.name}:create`, {
-      headers,
-      form: data,
-    });
-
-    if (!result.ok()) {
-      throw new Error(await result.text());
-    }
-  }
 };
 
 const createRandomData = async (collectionName: string, count = 10, data?: any) => {
@@ -842,14 +818,31 @@ function getHeaders(storageState: any) {
   return headers;
 }
 
+interface ExpectSettingsMenuParams {
+  showMenu: () => Promise<void>;
+  supportedOptions: string[];
+  page: Page;
+  unsupportedOptions?: string[];
+}
+
 /**
  * 辅助断言 SchemaSettings 的菜单项是否存在
  * @param param0
  */
-export async function expectSettingsMenu({ showMenu, supportedOptions, page }) {
+export async function expectSettingsMenu({
+  showMenu,
+  supportedOptions,
+  page,
+  unsupportedOptions,
+}: ExpectSettingsMenuParams) {
   await showMenu();
   for (const option of supportedOptions) {
     await expect(page.getByRole('menuitem', { name: option })).toBeVisible();
+  }
+  if (unsupportedOptions) {
+    for (const option of unsupportedOptions) {
+      await expect(page.getByRole('menuitem', { name: option })).not.toBeVisible();
+    }
   }
 }
 
@@ -860,7 +853,8 @@ export async function expectSettingsMenu({ showMenu, supportedOptions, page }) {
 export async function expectInitializerMenu({ showMenu, supportedOptions, page }) {
   await showMenu();
   for (const option of supportedOptions) {
-    await expect(page.getByRole('menuitem', { name: option })).toBeVisible();
+    // 使用 first 方法避免有重名的导致报错
+    await expect(page.getByRole('menuitem', { name: option }).first()).toBeVisible();
   }
 }
 
