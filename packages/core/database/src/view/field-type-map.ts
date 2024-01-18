@@ -21,10 +21,10 @@ const postgres = {
   json: ['json', 'array'],
   jsonb: ['json', 'array', 'jsonb'],
 
-  point: 'point',
-  path: 'lineString',
-  polygon: 'polygon',
-  circle: 'circle',
+  point: 'json',
+  path: 'json',
+  polygon: 'json',
+  circle: 'json',
   uuid: 'string',
 };
 
